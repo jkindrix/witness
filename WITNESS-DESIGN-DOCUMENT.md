@@ -85,8 +85,8 @@ None of these systems take a design document and produce a verified package. Wit
 Witness is:
 
 - **A verified synthesis system** that takes design documents and produces verified packages (code + tests + property proofs + traceability matrix).
-- **A TypeScript-first tool** in V1. TypeScript has the largest design document authorship base, the strongest ecosystem for property-based testing (fast-check), and is already supported by ProveKit's graduated verification pipeline.
-- **A composition of existing capabilities.** Witness does not implement a new LLM, a new proof assistant, or a new code representation. It orchestrates existing tools — ProveKit for verification, Axiom for code representation, Scriblr for LLM orchestration — into a pipeline that did not previously exist.
+- **A TypeScript-first tool** in V1. TypeScript has the largest design document authorship base, the strongest ecosystem for property-based testing (fast-check), and strong type-level verification capabilities for Tier 1.
+- **A composition of known techniques, not novel research.** Witness does not invent a new LLM, a new proof assistant, or a new code representation. It combines property-based testing, content-addressed ASTs, LLM orchestration, and symbolic execution into a pipeline purpose-built for design-document-anchored verification.
 
 Witness is **not**:
 
@@ -97,14 +97,14 @@ Witness is **not**:
 
 ### The Verification Cost Gradient
 
-The central architectural insight is that not all properties require the same level of verification, and the cost of verification should be proportional to the criticality of the property being verified. Witness implements four tiers, inspired by ProveKit's graduated verification pipeline:
+The central architectural insight is that not all properties require the same level of verification, and the cost of verification should be proportional to the criticality of the property being verified. Witness implements four tiers in a graduated verification pipeline:
 
 | Tier | Verification Method | Handles | Latency | Cost per Function | Confidence |
 |------|---------------------|---------|---------|-------------------|------------|
 | **Tier 1:** Static analysis | TypeScript strict mode + branded types + import/AST analysis | ~40% of properties (type constraints, nullability, enum membership, forbidden imports, structural constraints) | <1s | $0.00† | Deterministic |
 | **Tier 2:** Property-based | fast-check property tests (1,000+ random inputs) | ~30% of properties (input/output relationships, invariants, boundary conditions) | 2–10s | $0.02–0.10 | Probabilistic (high) |
 | **Tier 3:** Symbolic | Symbolic execution with constraint solving | ~20% of properties (path coverage, edge case exhaustion, state machine transitions) | 10–60s | $0.50–2.00 | Deterministic (for covered paths) |
-| **Tier 4:** SMT | Z3 SMT solver via ProveKit | ~10% of properties (universal quantification, mathematical invariants, security properties) | 30s–5min | $2.00–5.00 | Deterministic (mathematical proof) |
+| **Tier 4:** SMT | Z3 SMT solver | ~10% of properties (universal quantification, mathematical invariants, security properties) | 30s–5min | $2.00–5.00 | Deterministic (mathematical proof) |
 
 The percentages represent the expected distribution of properties extracted from a typical design document. A design document's scope boundaries ("not multi-tenant in V1") map to Tier 3 symbolic checks that no tenant-crossing paths exist.
 
@@ -157,16 +157,16 @@ Compare this to LLM-assisted formal specification with human review: the ATLAS p
          │                                             │
          ▼                                             │
 ┌─────────────────┐                                   │
-│   Code           │    Code: Axiom graph              │
-│   Generator      │    (content-addressed AST)        │
-│  (Scriblr LLM)   │                                   │
+│   Code           │    Code: content-addressed        │
+│   Generator      │    AST graph (BLAKE3)             │
+│  (LLM)           │                                   │
 └────────┬────────┘                                   │
          │                                             │
          ▼                                             │
 ┌─────────────────┐                                   │
 │   Graduated      │◄──────────────────────────────────┘
 │   Verifier       │    Checks code against properties
-│  (ProveKit)      │    at appropriate tier
+│  (Tiers 1–4)     │    at appropriate tier
 └────────┬────────┘
          │
          ├── PASS ──► Traceability Matrix + Verified Package
@@ -176,39 +176,39 @@ Compare this to LLM-assisted formal specification with human review: the ATLAS p
                       ▼
               ┌───────────────┐
               │  Re-generation │
-              │  (Scriblr LLM  │
-              │  + counterex.) │
+              │  (LLM +        │
+              │   counterex.)  │
               └───────┬───────┘
                       │
                       └──► Back to Verifier (max 5 iterations)
 ```
 
-### Component Mapping to Existing Systems
+### Witness Components
 
-| Witness Component | Underlying System | What It Provides |
+| Component | What It Does | Key Technique |
 |---|---|---|
-| Property Extractor | Scriblr (LLM orchestration) + custom parser | Extracts verifiable properties from design document sections |
-| Code Generator | Scriblr (model-agnostic LLM calls) | Generates TypeScript from extracted properties + design context |
-| Code Representation | Axiom (graph-first, content-addressed) | Canonical AST representation; structural validation; semantic mutation |
-| Graduated Verifier | ProveKit (property testing → symbolic → SMT) | Four-tier verification with cost gradient |
-| Output Materializer | tree2repo (atomic filesystem generation) | Transactional output of verified package to disk |
-| Pattern Guidance | Exemplary (103 pattern documents) | Architectural guidance during generation and verification |
-| Correctness Model | Blood (content-addressing philosophy) | BLAKE3 hashing of verified ASTs for tamper-evident identity |
+| Property Extractor | Extracts verifiable properties from design document sections | LLM-driven parsing + JSON schema validation |
+| Code Generator | Generates TypeScript from extracted properties + design context | LLM code generation with property-aware prompting |
+| Code Representation | Canonical AST representation; structural validation; semantic mutation | Content-addressed AST graph (BLAKE3 hashing) |
+| Graduated Verifier | Four-tier verification with cost gradient | tsc + fast-check + symbolic execution + Z3 |
+| Output Materializer | Atomic output of verified package to disk | Transactional filesystem write |
+| Traceability Engine | Links every artifact to its originating design document clause | Property → code → test → proof mapping |
 
-### Component Maturity Assessment
+All components are built as part of Witness. There are no external project dependencies beyond standard libraries (TypeScript, fast-check, Z3).
 
-Witness composes six systems from a single developer's portfolio. This is simultaneously a bootstrapping advantage (no external dependencies block development) and a credibility risk (maturity varies). Honest assessment:
+### Author's Related Work
 
-| Component | Role in Witness | Maturity | Known Limitations |
-|---|---|---|---|
-| **ProveKit** | Graduated verification engine | Alpha — core property testing works; symbolic execution is prototype-grade; SMT integration is V2 | Symbolic executor has bounded depth; no production deployments |
-| **Axiom** | Content-addressed AST representation | Beta — graph representation is solid; mutation engine works for targeted edits | Rust parser more mature than TS parser; no external users |
-| **Scriblr** | LLM orchestration | Beta — multi-provider support, fallback chains, sandboxing all functional | Agent loop checkpointing is new; load testing incomplete |
-| **Exemplary** | Pattern knowledge | Stable — 103 pattern documents, read-only usage | Pattern matching to domains is keyword-based, not semantic |
-| **tree2repo** | Atomic filesystem output | Stable — spec → filesystem generation is the core function | Tested primarily on small-to-medium projects |
-| **Blood** | Content-addressing philosophy (BLAKE3) | Alpha — language is in active development; BLAKE3 hashing of ASTs is proven | Blood itself is not a dependency; only the hashing approach is used |
+The author has built systems in adjacent problem spaces. These inform Witness's architecture but are not dependencies:
 
-The most critical dependency is ProveKit (the verification engine). If ProveKit's property testing tier fails to handle design-document-derived properties, the entire pipeline stalls. The Week 0 pilot will use ProveKit directly and will surface capability gaps before build investment.
+| Project | Domain | What it informed |
+|---|---|---|
+| **Axiom** | Graph-first, content-addressed AST representation | The content-addressed hashing approach (BLAKE3 of AST nodes) for incremental re-verification |
+| **Scriblr** | LLM orchestration with multi-provider support | Prompt engineering patterns for structured extraction from natural language |
+| **Exemplary** | Pattern library (103 documented software patterns) | Domain-aware code generation strategies |
+| **Blood** | Programming language with correctness philosophy | Graduated verification concept (Proposal 7: runtime contracts → compile-time verification → full proofs) |
+| **tree2repo** | Specification-to-filesystem generation | Atomic output materialization |
+
+The most critical build item is the Graduated Verifier. If the property-testing tier fails to handle design-document-derived properties, the pipeline stalls. The Week 0 pilot validated that the *properties themselves* are extractable; Weeks 3–4 will validate that they are *verifiable*.
 
 ### Production-Grade Example
 
@@ -518,7 +518,7 @@ The Property Extractor transforms design document sections into a structured lis
 | Evaluation Plan (P11) | Success/failure thresholds | Parse experimental design metrics as property targets |
 | Architecture tiers (P6) | Per-tier performance envelopes | Parse tier tables as bounded-cost properties |
 
-**Phase 2: Property Synthesis.** For each identified verifiable clause, an LLM call (via Scriblr) generates the property specification in the structured format shown in the worked example. The LLM prompt includes the original clause, the section type, and a few-shot example set of clause → property mappings. The output is validated against a JSON schema before acceptance.
+**Phase 2: Property Synthesis.** For each identified verifiable clause, an LLM call generates the property specification in the structured format shown in the worked example. The LLM prompt includes the original clause, the section type, and a few-shot example set of clause → property mappings. The output is validated against a JSON schema before acceptance.
 
 **Accuracy target:** ≥80% of properties correctly extracted on first pass, as judged by the document's author. Properties the LLM cannot extract are flagged for human review with the source clause highlighted.
 
@@ -526,23 +526,23 @@ The Property Extractor transforms design document sections into a structured lis
 
 ### 4.2 Code Generator
 
-The Code Generator produces TypeScript source code that satisfies the extracted properties. It uses Scriblr's model-agnostic LLM infrastructure, which supports 100+ providers with automatic fallback chains and circuit breakers.
+The Code Generator produces TypeScript source code that satisfies the extracted properties, using LLM code generation with property-aware prompting.
 
-**Generation strategy:** The generator receives the full property list, the original design document sections referenced by each property, and Exemplary pattern recommendations for the domain. It generates code as an Axiom graph (content-addressed AST) rather than raw text, ensuring structural validity by construction — syntax errors are impossible because the graph representation enforces well-formedness.
+**Generation strategy:** The generator receives the full property list, the original design document sections referenced by each property, and pattern guidance for the domain. It generates code as a content-addressed AST graph rather than raw text, ensuring structural validity by construction — syntax errors are impossible because the graph representation enforces well-formedness.
 
 **Re-generation loop:** When the Graduated Verifier reports a property failure, the generator receives:
 1. The failing property specification
 2. The counterexample (specific input that violated the property)
-3. The current code as an Axiom graph
-4. Fix guidance from ProveKit (which property of which function failed, and how)
+3. The current code as a content-addressed AST graph
+4. Fix guidance from the verifier (which property of which function failed, and how)
 
-The generator then applies a *semantic mutation* (via Axiom's mutation engine) rather than regenerating from scratch. This preserves verified properties while targeting the specific failure. Maximum 5 re-generation iterations per property before escalating to human.
+The generator then applies a *semantic mutation* (targeted AST edit) rather than regenerating from scratch. This preserves verified properties while targeting the specific failure. Maximum 5 re-generation iterations per property before escalating to human.
 
 **Cost:** 1–3 LLM calls per function (initial generation + 0–2 re-generations). For a typical rate limiter with 5 public functions: **$0.25–$1.50**.
 
 ### 4.3 Graduated Verifier
 
-The Graduated Verifier is ProveKit, wrapped with a tier-assignment layer that routes each property to the cheapest tier that can verify it.
+The Graduated Verifier is Witness's core verification engine, with a tier-assignment layer that routes each property to the cheapest tier that can verify it.
 
 **Tier assignment rules:**
 
@@ -555,11 +555,11 @@ The Graduated Verifier is ProveKit, wrapped with a tier-assignment layer that ro
 
 **Tier ambiguity resolution.** Many properties could plausibly be verified at multiple tiers. A property like "no code path accepts a tenant identifier parameter" could be Tier 1 (static analysis of function signatures), Tier 2 (property test that no function accepts a tenantId), or Tier 3 (symbolic path analysis). The assignment rule is: **assign to the cheapest tier that provides sufficient confidence.** When the LLM-suggested tier and the verifier's actual capability disagree, the verifier's tier-escalation mechanism handles it automatically: if Tier 1 verification fails or is inconclusive, the property is promoted to Tier 2, then Tier 3. This "try cheap first, escalate on failure" strategy means tier misassignment costs time (unnecessary verification attempts) but not correctness.
 
-**Verification is incremental.** When code changes (detected by Axiom's content-addressed hashing), only properties whose referenced AST nodes have changed hashes are re-verified. This is the key performance optimization: a change to the `evictExpired` function re-verifies P6 but not P1 through P5.
+**Verification is incremental.** When code changes (detected by content-addressed hashing of AST nodes), only properties whose referenced nodes have changed hashes are re-verified. This is the key performance optimization: a change to the `evictExpired` function re-verifies P6 but not P1 through P5.
 
 ### 4.4 Output Package
 
-The verified package written to disk (via tree2repo, atomically) contains:
+The verified package written atomically to disk contains:
 
 ```
 <project>/
@@ -663,7 +663,7 @@ Kill criteria K1 and K6 are the existential gates. If design documents do not co
 
 ### V1 Scope
 
-V1 targets TypeScript only. The design document must conform to the Design Document Standard. The verification pipeline supports Tiers 1–3 (type-level, property-based, symbolic). Tier 4 (SMT) is deferred to V2 pending ProveKit's SMT integration maturity.
+V1 targets TypeScript only. The design document must conform to the Design Document Standard. The verification pipeline supports Tiers 1–3 (static analysis, property-based, symbolic). Tier 4 (SMT) is deferred to V2.
 
 ### Week 0: Extraction Pilot (Pre-Commitment Gate)
 
@@ -698,10 +698,10 @@ Before committing to the 6-week build, validate the core thesis with a manual ex
 
 | Week | Deliverable | Dependencies | Gate |
 |------|-------------|-------------|------|
-| **Weeks 1–2** | Property Extractor: parse design document sections, extract properties to JSON schema, iterate prompt engineering across multiple document styles, validate extraction accuracy on 5 sample documents. Two weeks because this is the thesis-critical component — it deserves development time proportional to its importance. | Scriblr LLM infrastructure (exists), Week 0 pilot passes | Extraction accuracy ≥60% on sample docs |
-| **Week 3** | Code Generator: generate TypeScript from extracted properties using Scriblr, represent as Axiom graph, render to files | Axiom graph representation (exists), Property Extractor (Weeks 1–2) | Generated code compiles for 3 sample docs |
-| **Week 4** | Graduated Verifier integration: wire ProveKit Tiers 1–3 to extracted properties, implement tier assignment, build re-generation loop with counterexample feedback | ProveKit (exists), Code Generator (Week 3) | ≥50% of properties verify on sample docs |
-| **Week 5** | End-to-end pipeline: traceability matrix generation, output package via tree2repo, CLI interface (`witness generate <doc.md>`), incremental re-verification on code change | All prior weeks, tree2repo (exists) | Full pipeline runs on 5 sample docs |
+| **Weeks 1–2** | Property Extractor: parse design document sections, extract properties to JSON schema, iterate prompt engineering across multiple document styles, validate extraction accuracy on 5 sample documents. Two weeks because this is the thesis-critical component — it deserves development time proportional to its importance. | Week 0 pilot passes | Extraction accuracy ≥60% on sample docs |
+| **Week 3** | Code Generator: generate TypeScript from extracted properties, represent as content-addressed AST graph, render to files | Property Extractor (Weeks 1–2) | Generated code compiles for 3 sample docs |
+| **Week 4** | Graduated Verifier: implement Tiers 1–3, tier assignment logic, re-generation loop with counterexample feedback | Code Generator (Week 3) | ≥50% of properties verify on sample docs |
+| **Week 5** | End-to-end pipeline: traceability matrix generation, output package, CLI interface (`witness generate <doc.md>`), incremental re-verification on code change | All prior weeks | Full pipeline runs on 5 sample docs |
 | **Week 6** | Evaluation: run blinded multi-arm study per Section 5, collect weighted defect counts and secondary metrics | 10 evaluation documents (prepared by external authors during Weeks 1–5), 5 evaluators recruited | Data collected |
 | **Week 7** | Decision gate: analyze evaluation results against kill criteria; if K1–K6 pass, plan V2; if any kill criterion triggers, assess whether redesign or halt | Week 6 results | Go / Redesign / Halt |
 
@@ -709,13 +709,13 @@ Before committing to the 6-week build, validate the core thesis with a manual ex
 
 - **After Week 0 (existential):** If manual extraction pilot shows <50% property extractability on real-world documents, halt. The core thesis requires revision before any build investment. This is the cheapest gate in the entire roadmap — 2–3 days to validate or falsify the foundational assumption.
 - **After Week 2:** If extraction accuracy is below 60% after two weeks of development, assess whether the gap is in prompt engineering (iterate further) or in the fundamental expressiveness of design documents (revisit thesis). The two-week allocation already provides iteration time; if 60% is not achieved in this window, the problem is likely structural.
-- **After Week 4:** If verification success rate is below 50%, assess whether the gap is in tier assignment (fixable) or in ProveKit's capabilities (requires ProveKit improvements, potentially blocking).
+- **After Week 4:** If verification success rate is below 50%, assess whether the gap is in tier assignment (fixable) or in the verifier's capabilities (requires verifier improvements, potentially blocking).
 - **After Week 6:** Kill criteria evaluation. This is the hard gate. No V2 planning until K1–K6 are evaluated.
 
 ### V2 Scope (Conditional on V1 Success)
 
 - Tier 4 (SMT) verification via Z3
-- Support for Rust (leveraging Axiom's Rust parser and Verus integration potential)
+- Support for Rust (with Verus integration potential)
 - Design document authoring assistance (property preview during writing)
 - CI/CD integration (re-verify on every commit that touches Witness-generated code)
 
@@ -729,12 +729,12 @@ Before committing to the 6-week build, validate the core thesis with a manual ex
 
 | Decision | Choice | Rationale | Alternatives Considered |
 |----------|--------|-----------|------------------------|
-| V1 target language | TypeScript | Largest design document authorship base; ProveKit already supports TS; fast-check is mature for property testing; Axiom has TS parser | Rust (stronger type system but smaller user base), Python (popular but weak static analysis) |
-| Code representation | Axiom graph (content-addressed AST) | Structural validity by construction; incremental re-verification via hash comparison; semantic mutation for targeted re-generation | Raw text (simpler but no structural guarantees), tree-sitter CST (no content-addressing) |
-| LLM orchestration | Scriblr (model-agnostic) | Supports 100+ providers; automatic fallback; sandboxed execution; agent loop with checkpointing | Direct API calls (no fallback, no sandboxing), LangChain (Python-only, heavy abstraction) |
-| Verification engine | ProveKit (graduated pipeline) | Already implements property testing → symbolic → SMT gradient; TypeScript-native; designed for "mortals" not proof experts | Dafny (requires formal spec), Lean (steep learning curve), custom verifier (massive effort) |
+| V1 target language | TypeScript | Largest design document authorship base; fast-check is mature for property testing; strong type system for Tier 1 verification | Rust (stronger type system but smaller user base), Python (popular but weak static analysis) |
+| Code representation | Content-addressed AST graph | Structural validity by construction; incremental re-verification via hash comparison; semantic mutation for targeted re-generation | Raw text (simpler but no structural guarantees), tree-sitter CST (no content-addressing) |
+| LLM orchestration | Model-agnostic with fallback | Multi-provider support for resilience; sandboxed execution for safety | Single-provider (fragile), LangChain (Python-only, heavy abstraction) |
+| Verification engine | Graduated pipeline (built into Witness) | Property testing → symbolic → SMT gradient; TypeScript-native; designed for "mortals" not proof experts | Dafny (requires formal spec), Lean (steep learning curve), existing verifier (none fits this use case) |
 | Output format | Verified package (code + tests + proofs + traceability) | Audit trail enables trust verification; traceability enables design document updates to trigger targeted re-verification | Code-only (no verification evidence), Formal proof only (not useful to most engineers) |
-| Content addressing | BLAKE3 | Fast (3.5 GB/s), cryptographically secure, used by Blood for AST hashing; deterministic | SHA256 (slower), xxHash (not cryptographic) |
+| Content addressing | BLAKE3 | Fast (3.5 GB/s), cryptographically secure, deterministic; proven approach for AST hashing | SHA256 (slower), xxHash (not cryptographic) |
 
 ### Open Questions
 
@@ -764,14 +764,14 @@ Design documents, even those conforming to the standard, contain ambiguity that 
 **T2: Re-generation loop may not converge.**
 When a property test fails, the counterexample-guided re-generation may oscillate: fixing one property breaks another. This is the fundamental challenge of multi-property synthesis — satisfying all constraints simultaneously is harder than satisfying them individually.
 
-*Mitigation:* The re-generation loop is capped at 5 iterations. Properties are verified in tier order (cheapest first), so Tier 1 constraints are satisfied before Tier 2 generation begins. Axiom's semantic mutation engine applies targeted fixes rather than full regeneration, preserving already-verified properties. Kill criterion K3 (convergence failure on >30% of properties) detects systemic issues.
+*Mitigation:* The re-generation loop is capped at 5 iterations. Properties are verified in tier order (cheapest first), so Tier 1 constraints are satisfied before Tier 2 generation begins. Semantic mutation applies targeted AST fixes rather than full regeneration, preserving already-verified properties. Kill criterion K3 (convergence failure on >30% of properties) detects systemic issues.
 
 *Severity:* Medium. Convergence failure on individual properties is expected and handled (escalate to human). Systemic non-convergence would require architectural changes to the generation strategy.
 
 **T3: Symbolic execution (Tier 3) may be too slow for interactive use.**
 Symbolic execution scales poorly with code complexity. A function with 10 branch points has 1,024 paths; symbolic exploration of all paths may take minutes.
 
-*Mitigation:* Tier 3 is reserved for ~20% of properties (those requiring path-sensitive reasoning). ProveKit's symbolic executor uses bounded exploration with configurable depth. Kill criterion K5 (>30 minutes end-to-end) catches cases where Tier 3 dominates runtime.
+*Mitigation:* Tier 3 is reserved for ~20% of properties (those requiring path-sensitive reasoning). The symbolic executor uses bounded exploration with configurable depth. Kill criterion K5 (>30 minutes end-to-end) catches cases where Tier 3 dominates runtime.
 
 *Severity:* Low. Tier 3 can be skipped in favor of Tier 2 (property testing) with a reduction in confidence level but not a loss of functionality.
 
@@ -821,7 +821,7 @@ Witness is a bet on three propositions:
 
 3. **Verified code from design documents has fewer defects than unverified AI code.** This is the claim that matters. If design-document-anchored verification produces measurably better code, then Witness has found the bridge between vibe coding and vericoding — the bridge that meets engineers where they are (writing design documents) rather than where formal methods practitioners are (writing Dafny). If this is false, kill criterion K6 will surface it within Week 7.
 
-**The bet costs a 2-day extraction pilot (Week 0) followed by 7 weeks of development and approximately $500 in LLM API costs for evaluation.** The Week 0 pilot tests proposition 1 before any build investment. The underlying components — ProveKit, Axiom, Scriblr, Exemplary, tree2repo — already exist. Witness is their composition into a pipeline that did not previously exist.
+**The bet costs a 2-day extraction pilot (Week 0) followed by 7 weeks of development and approximately $500 in LLM API costs for evaluation.** The Week 0 pilot tests proposition 1 before any build investment. The author has built systems in adjacent problem spaces (AST manipulation, LLM orchestration, pattern libraries, content-addressed code, language design with correctness philosophy). Witness draws on that experience but is a standalone system — every component is purpose-built.
 
 **If the bet is wrong,** the kill criteria will identify which proposition failed and why. Proposition 1 is tested in 2 days (Week 0). No remaining proposition requires more than 7 weeks to test. The investment is bounded and the failure modes are informative.
 
